@@ -23,6 +23,7 @@ class DataLayer(str, Enum):
     MACRO = "macro"
     NEWS = "news"
     OPINION = "opinion"
+    RISK = "risk"
 
 
 @dataclass

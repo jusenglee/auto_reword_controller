@@ -7,6 +7,8 @@ import requests
 import yfinance as yf
 
 from executor import ToolRunner
+from news_client import NewsClient, NewsItem, NaverNewsClient
+from src.auto_reword_controller.models import ContentBlock, SourceMeta, DataLayer
 
 
 class RealToolRunner:
@@ -15,9 +17,25 @@ class RealToolRunner:
         "KOSPI": "^KS11",
         "KOSDAQ": "^KQ11",
     }
+    FX_TICKER = "KRW=X"
 
-    def __init__(self, target_date: date | None = None) -> None:
+    def __init__(
+            self,
+            target_date: date | None = None,
+            news_client: NewsClient | None = None,
+    ) -> None:
         self.target_date = target_date or date.today()
+        self.dart_api_key = "4e8331d5b1d298378f4dce21f6ff955a398134d0"
+        # 주입 안 해주면 기본으로 NaverNewsClient 시도
+        self.news_client: NewsClient | None = news_client
+        if self.news_client is None:
+            try:
+                self.news_client = NaverNewsClient()
+            except Exception:
+                # 키 없거나 실패하면 그냥 None으로 두고, 아래에서 stub로 처리
+                self.news_client = None
+
+
 
     def get_index_snapshot(self, *, indices: Iterable[str]) -> Iterable[Dict[str, Any]]:
         """야후 파이낸스에서 KOSPI/KOSDAQ 지수 스냅샷을 가져온다."""
@@ -142,7 +160,7 @@ class RealToolRunner:
         ymd = self.target_date.strftime("%Y%m%d")
 
         params = {
-            "crtfc_key": "4e8331d5b1d298378f4dce21f6ff955a398134d0",
+            "crtfc_key": self.dart_api_key,
             "bgn_de": ymd,
             "end_de": ymd,
             # 유가/코스닥 위주
@@ -283,39 +301,158 @@ class RealToolRunner:
 
         return records
 
-    # -------- MACRO 계열 --------
     def get_macro_snapshot(self) -> Iterable[Dict[str, Any]]:
-        return [
-            {
-                "title": "거시 지표 스냅샷(모의)",
-                "body": "기준금리 3.50%, 3년국채 3.20%, USD/KRW 1,350원 (모의 데이터)",
-                "tags": ["macro", "rate", "fx", "mock"],
-                "source_id": "mock_macro",
-                "source_score": 0.9,
-                "recency_score": 0.8,
-                "structure_score": 0.8,
-                "consistency_score": 0.8,
-            }
-        ]
+        """
+        원·달러 환율 중심의 간단한 거시 스냅샷.
+        - KRW=X (USD/KRW) 일봉 기준
+        - target_date 기준 최근 거래일 환율 + 전일 대비 %
+        """
+        records: List[Dict[str, Any]] = []
 
-    # -------- NEWS 계열 --------
-    def search_kr_stock_news(self, *, query: str, limit: int) -> Iterable[Dict[str, Any]]:
-        lines = [
-                    f"[모의 뉴스] '{query}' 관련 시황 기사 1",
-                    f"[모의 뉴스] '{query}' 관련 시황 기사 2",
-                ][:limit]
-        return [
+        start = (self.target_date - timedelta(days=10)).strftime("%Y-%m-%d")
+        end = (self.target_date + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        df = yf.download(
+            self.FX_TICKER,
+            start=start,
+            end=end,
+            auto_adjust=False,
+            progress=False,
+        )
+
+        if df.empty:
+            records.append(
+                {
+                    "title": "환율 스냅샷 (데이터 없음)",
+                    "body": "야후 파이낸스에서 USD/KRW 환율 데이터를 가져오지 못했습니다.",
+                    "tags": ["macro", "fx", "error"],
+                    "source_id": "yahoo_finance_fx",
+                    "source_score": 0.4,
+                    "recency_score": 0.0,
+                    "structure_score": 0.6,
+                    "consistency_score": 0.6,
+                }
+            )
+            return records
+
+        df = df.sort_index()
+        close = float(df["Close"].iloc[-1])
+        last_date = df.index[-1].date()
+
+        if len(df) >= 2:
+            prev_close = float(df["Close"].iloc[-2])
+            if prev_close > 0:
+                change_pct = (close / prev_close - 1.0) * 100.0
+            else:
+                change_pct = 0.0
+        else:
+            prev_close = None
+            change_pct = 0.0
+
+        body = (
+            f"원·달러 환율 {close:,.2f}원/USD, "
+            f"전일 대비 {change_pct:+.2f}% "
+            f"(야후 파이낸스 기준, {last_date.isoformat()} 종가)"
+        )
+
+        if last_date != self.target_date:
+            body += (
+                f"\n※ {self.target_date.isoformat()}은(는) 휴장일/비거래일로, "
+                f"가장 가까운 과거 거래일 데이터를 사용했습니다."
+            )
+
+        day_diff = (self.target_date - last_date).days
+        recency_score = 0.9 if day_diff == 0 else max(0.5, 0.9 - 0.05 * day_diff)
+
+        records.append(
             {
-                "title": f"국내 증시 뉴스 요약(모의) - {query}",
-                "body": "\n".join(lines),
-                "tags": ["news", "mock"],
-                "source_id": "mock_news",
-                "source_score": 0.7,
-                "recency_score": 0.7,
-                "structure_score": 0.7,
-                "consistency_score": 0.6,
+                "title": "환율/거시 스냅샷",
+                "body": body,
+                "tags": ["macro", "fx"],
+                "source_id": "yahoo_finance_fx",
+                "source_score": 0.9,
+                "recency_score": recency_score,
+                "structure_score": 0.9,
+                "consistency_score": 0.9,
             }
-        ]
+        )
+
+        return records
+
+    def search_kr_stock_news(self, *, query: str, limit: int) -> Iterable[Dict[str, Any]]:
+        """네이버 뉴스 검색 API를 이용해 국내 증시 관련 뉴스를 가져온다.
+
+        - query: '코스닥', '밸류업', '삼성전자 공시' 등
+        - limit: 최대 개수 (네이버는 최대 100건까지 허용)
+        """
+        # 뉴스 클라이언트가 아예 준비 안 돼 있으면, stub 한 줄만 반환
+        if self.news_client is None:
+            return [
+                {
+                    "title": f"국내 증시 뉴스 요약(Stub) - {query}",
+                    "body": (
+                        f"[Stub] '{query}' 관련 네이버 뉴스 클라이언트가 "
+                        "설정되지 않아 실제 데이터를 가져오지 못했습니다."
+                    ),
+                    "tags": ["news", "stub"],
+                    "source_id": "naver_news_stub",
+                    "source_score": 0.3,
+                    "recency_score": 0.0,
+                    "structure_score": 0.5,
+                    "consistency_score": 0.5,
+                }
+            ]
+
+        try:
+            items = self.news_client.search(query=query, limit=limit)
+        except Exception as e:
+            # API 오류 시에도 파이프라인 전체가 터지지 않도록 안전하게 처리
+            return [
+                {
+                    "title": f"국내 증시 뉴스 조회 실패 - {query}",
+                    "body": f"네이버 뉴스 API 호출 중 오류 발생: {e}",
+                    "tags": ["news", "error"],
+                    "source_id": "naver_news_error",
+                    "source_score": 0.4,
+                    "recency_score": 0.0,
+                    "structure_score": 0.6,
+                    "consistency_score": 0.5,
+                }
+            ]
+
+        records: List[Dict[str, Any]] = []
+        today = self.target_date
+
+        for item in items:
+            pub_date = item.published_at.date()
+            day_diff = (today - pub_date).days
+            # 오늘 0.9, 하루 전 0.8, … 최소 0.4까지
+            recency = 0.9 if day_diff == 0 else max(0.4, 0.9 - 0.1 * max(day_diff, 0))
+
+            body_lines = [
+                item.summary,
+                "",
+                f"출처: {item.source}",
+                f"링크: {item.url}",
+                f"발행일: {pub_date.isoformat()}",
+            ]
+            body = "\n".join(body_lines).strip()
+
+            records.append(
+                {
+                    "title": item.title,
+                    "body": body,
+                    "tags": ["news", item.source, "naver"],
+                    "source_id": "naver_news",
+                    "source_score": 0.8,
+                    "recency_score": recency,
+                    "structure_score": 0.8,
+                    "consistency_score": 0.7,
+                }
+            )
+
+        return records
+
 
     # -------- OPINION 계열 --------
     def get_forum_sentiment(self, *, topics: Iterable[str]) -> Iterable[Dict[str, Any]]:
@@ -334,3 +471,105 @@ class RealToolRunner:
             }
         ]
 
+    def get_volatility_snapshot(self, target_date: date) -> Iterable[ContentBlock]:
+        """국내/해외 변동성 지수 스냅샷을 가져온다.
+
+        - VKOSPI (KOSPI 200 Volatility, 한국 '공포지수')  -> Investing.com HTML 파싱
+        - VIX (미국 S&P500 Vol 지수)                    -> yfinance
+        """
+        blocks: list[ContentBlock] = []
+
+        # -------------------------------
+        # 1) VKOSPI (KOSPI Volatility)
+        # -------------------------------
+        try:
+            url = "https://www.investing.com/indices/kospi-volatility"
+            headers = {
+                # 간단한 UA 지정 (너 IDE에서 쓰던 거 아무거나 넣어도 됨)
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0 Safari/537.36"
+                ),
+            }
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            html = resp.text
+
+            # 페이지 안에 이런 문장이 있음:
+            # "The KOSPI Volatility live stock price is 28.40." :contentReference[oaicite:1]{index=1}
+            from typing import re
+            m = re.search(
+                r"KOSPI Volatility live stock price is\s+([0-9.]+)",
+                html,
+            )
+            if m:
+                vkospi = float(m.group(1))
+                body = (
+                    f"VKOSPI(코스피200 변동성 지수) {vkospi:.2f}pt "
+                    f"(KOSPI 변동성 지수, {target_date.isoformat()} 기준 추정)"
+                )
+                blocks.append(
+                    ContentBlock(
+                        title="국내 옵션 변동성 지수(VKOSPI)",
+                        body=body,
+                        meta=SourceMeta(
+                            source_id="investing_vkospi",
+                            layer=DataLayer.RISK,
+                            source_score=0.8,        # HTML 파싱이라 0.8 정도
+                            recency_score=0.9,
+                            structure_score=0.7,
+                            consistency_score=0.7,
+                        ),
+                        tags=["vkospi", "volatility", "options", "risk"],
+                    )
+                )
+            else:
+                # 파싱 실패 시, LLM에게는 안 넘기고 로그만 남기기
+                self._logger.warning("[get_volatility_snapshot] VKOSPI parse 실패")
+        except Exception as e:  # noqa: BLE001
+            self._logger.warning(f"[get_volatility_snapshot] VKOSPI 요청 실패: {e}")
+
+        # -------------------------------
+        # 2) VIX (미국 변동성 지수, 선택)
+        # -------------------------------
+        try:
+            import yfinance as yf
+
+            vix = yf.Ticker("^VIX")
+            hist = vix.history(period="2d")
+            if not hist.empty:
+                last = hist.iloc[-1]
+                close = float(last["Close"])
+                if len(hist) >= 2:
+                    prev = float(hist.iloc[-2]["Close"])
+                    chg = close - prev
+                    chg_pct = (chg / prev) * 100 if prev != 0 else 0.0
+                else:
+                    chg = 0.0
+                    chg_pct = 0.0
+
+                body = (
+                    f"VIX(미국 S&P500 변동성 지수) {close:.2f}pt, "
+                    f"전일 대비 {chg:+.2f}pt ({chg_pct:+.2f}%) "
+                    f"(야후 파이낸스 기준, {target_date.isoformat()} 기준)"
+                )
+                blocks.append(
+                    ContentBlock(
+                        title="글로벌 변동성 지수(VIX)",
+                        body=body,
+                        meta=SourceMeta(
+                            source_id="yahoo_vix",
+                            layer=DataLayer.RISK,
+                            source_score=0.9,
+                            recency_score=0.9,
+                            structure_score=0.9,
+                            consistency_score=0.9,
+                        ),
+                        tags=["vix", "volatility", "us", "risk"],
+                    )
+                )
+        except Exception as e:  # noqa: BLE001
+            self._logger.warning(f"[get_volatility_snapshot] VIX 조회 실패: {e}")
+
+        return blocks

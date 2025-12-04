@@ -55,6 +55,7 @@ class ReportBuilder:
             (DataLayer.MACRO, "거시/정책"),
             (DataLayer.NEWS, "뉴스/해석"),
             (DataLayer.OPINION, "시장 심리"),
+            (DataLayer.RISK, "옵션/변동성"),
         )
         for layer, heading in ordering:
             layer_blocks = self._blocks_by_layer(data, layer)

@@ -12,8 +12,9 @@ from models import DailyStockReportPlan, DataLayer, TaskPlan
 # 항상 수행되는 고정 루틴 툴 이름
 BASE_TASKS: Sequence[str] = (
     "get_index_snapshot",
-    # "get_macro_snapshot",
+    "get_macro_snapshot",
     "get_dart_disclosures",
+    "search_kr_stock_news",
 )
 
 
@@ -28,11 +29,15 @@ def build_base_plan(target_date: date) -> DailyStockReportPlan:
     뉴스/커뮤니티를 덧붙이도록 설계했다.
     """
     tasks: List[TaskPlan] = [
-        TaskPlan(tool="get_index_snapshot", args={"indices": ["KOSPI", "KOSDAQ"]}, purpose="지수 스냅샷"),
-        # TaskPlan(tool="get_macro_snapshot", args={}, purpose="금리/환율 등 거시"),
+        TaskPlan(tool="get_index_snapshot", args={}, purpose="지수/섹터 스냅샷"),
+        TaskPlan(tool="get_dart_disclosures", args={}, purpose="당일 주요 공시 확인"),
+        TaskPlan(tool="get_macro_snapshot", args={}, purpose="환율 등 거시 환경"),
+        TaskPlan(tool="search_kr_stock_news", args={"limit": 10}, purpose="관련 뉴스"),
+        TaskPlan(tool="get_forum_sentiment", args={}, purpose="커뮤니티 심리 (현재 mock)"),
         TaskPlan(
-            tool="get_dart_disclosures",
-            args={"importance": "high"},
+            tool="get_volatility_snapshot",
+            args={},
+            purpose="국내/글로벌 옵션 변동성 지수 스냅샷",
         ),
     ]
     return DailyStockReportPlan(date=target_date, tasks=tasks, base_tasks=list(BASE_TASKS))
