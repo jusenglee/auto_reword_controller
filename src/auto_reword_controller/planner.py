@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Dict, Iterable, List, Mapping, Protocol, Sequence
 
-from .models import DailyStockReportPlan, TaskPlan
-from .plan import BASE_TASKS, build_base_plan, enrich_plan
+from models import DailyStockReportPlan, TaskPlan
+from plan import BASE_TASKS, build_base_plan, enrich_plan
 
 # MCP 툴 화이트리스트
 ALLOWED_TOOLS: Sequence[str] = (

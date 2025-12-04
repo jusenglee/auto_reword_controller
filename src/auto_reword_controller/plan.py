@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Iterable, List, Sequence
 
-from .models import DailyStockReportPlan, DataLayer, TaskPlan
+from models import DailyStockReportPlan, DataLayer, TaskPlan
 
 # 항상 수행되는 고정 루틴 툴 이름
 BASE_TASKS: Sequence[str] = (

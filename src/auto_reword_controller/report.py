@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, List
 
-from .models import ContentBlock, DailyStockReportData, DailyStockReportOutput, DataLayer, LayeredSummary, ReportSection
+from models import ContentBlock, DailyStockReportData, DailyStockReportOutput, DataLayer, LayeredSummary, ReportSection
 
 
 @dataclass
