@@ -12,7 +12,7 @@ from models import DailyStockReportPlan, DataLayer, TaskPlan
 # 항상 수행되는 고정 루틴 툴 이름
 BASE_TASKS: Sequence[str] = (
     "get_index_snapshot",
-    "get_macro_snapshot",
+    # "get_macro_snapshot",
     "get_dart_disclosures",
 )
 
@@ -29,11 +29,10 @@ def build_base_plan(target_date: date) -> DailyStockReportPlan:
     """
     tasks: List[TaskPlan] = [
         TaskPlan(tool="get_index_snapshot", args={"indices": ["KOSPI", "KOSDAQ"]}, purpose="지수 스냅샷"),
-        TaskPlan(tool="get_macro_snapshot", args={}, purpose="금리/환율 등 거시"),
+        # TaskPlan(tool="get_macro_snapshot", args={}, purpose="금리/환율 등 거시"),
         TaskPlan(
             tool="get_dart_disclosures",
             args={"importance": "high"},
-            purpose="주요 공시 이벤트",
         ),
     ]
     return DailyStockReportPlan(date=target_date, tasks=tasks, base_tasks=list(BASE_TASKS))
