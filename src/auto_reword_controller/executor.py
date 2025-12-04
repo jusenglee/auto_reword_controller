@@ -50,7 +50,11 @@ class PlanExecutor:
         self.config = config or ExecutionConfig()
 
     def execute(self, plan: DailyStockReportPlan) -> DailyStockReportData:
-        """Plan 순서대로 툴을 호출해 데이터를 수집한다."""
+        """Plan 순서대로 툴을 호출해 데이터를 수집한다.
+
+        - MCP 툴 호출 결과에 레이어/품질 메타를 부여하고,
+        - minimum_quality 미만은 버려 신뢰성 1차 필터를 적용한다.
+        """
         dataset = DailyStockReportData(date=plan.date)
         for task in plan.tasks:
             tool_method = getattr(self.runner, task.tool)

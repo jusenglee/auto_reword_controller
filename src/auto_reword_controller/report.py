@@ -19,7 +19,12 @@ class ReportPrompt:
 
 class ReportBuilder:
     def build_prompt(self, data: DailyStockReportData) -> ReportPrompt:
-        """LLM에게 줄 간결한 프롬프트 페이로드를 만든다."""
+        """LLM에게 줄 간결한 프롬프트 페이로드를 만든다.
+
+        각 ContentBlock의 레이어/품질 밴드를 risk 태그로 변환해 제공함으로써,
+        정량 데이터는 확정, 뉴스는 보조, 커뮤니티는 speculative로 구분하도록
+        LLM 답변을 가이드한다.
+        """
         summaries: List[LayeredSummary] = []
         for task_name, blocks in data.collected.items():
             for block in blocks:

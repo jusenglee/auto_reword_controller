@@ -67,6 +67,11 @@ class PlanCompiler:
         self.allowed_tools = set(allowed_tools or ALLOWED_TOOLS)
 
     def compile_tasks(self, raw_tasks: Iterable[Mapping[str, Any]]) -> List[TaskPlan]:
+        """화이트리스트/기본 파라미터를 적용해 안전한 Task 리스트를 만든다.
+
+        LLM이 헛소리를 하더라도 허용된 MCP 툴과 기본 args만 통과시키며,
+        부족한 인자를 DEFAULT_TOOL_ARGS로 채워 신뢰성 있는 호출 형태를 보장한다.
+        """
         tasks: List[TaskPlan] = []
         for item in raw_tasks:
             tool = item.get("tool")
@@ -78,6 +83,7 @@ class PlanCompiler:
         return tasks
 
     def merge_with_base(self, base_plan: DailyStockReportPlan, raw_plan: Mapping[str, Any]) -> DailyStockReportPlan:
+        """항상 실행되는 Base Plan 위에 LLM 확장 루틴을 병합한다."""
         extra_tasks = self.compile_tasks(raw_plan.get("tasks", []))
         base_tools = {task.tool for task in base_plan.tasks}
         merged: List[TaskPlan] = list(base_plan.tasks)

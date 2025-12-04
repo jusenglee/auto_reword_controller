@@ -18,7 +18,15 @@ BASE_TASKS: Sequence[str] = (
 
 
 def build_base_plan(target_date: date) -> DailyStockReportPlan:
-    """최소 동작을 위한 기본 Plan을 생성한다."""
+    """최소 동작을 위한 기본 Plan을 생성한다.
+
+    - Price: 지수 스냅샷
+    - Macro/Policy: 금리·환율 등 거시 지표
+    - Disclosure: DART 주요 공시
+
+    신뢰성 높은 데이터를 항상 확보해 두고, 이후 LLM 확장(enrich_plan)이
+    뉴스/커뮤니티를 덧붙이도록 설계했다.
+    """
     tasks: List[TaskPlan] = [
         TaskPlan(tool="get_index_snapshot", args={"indices": ["KOSPI", "KOSDAQ"]}, purpose="지수 스냅샷"),
         TaskPlan(tool="get_macro_snapshot", args={}, purpose="금리/환율 등 거시"),
