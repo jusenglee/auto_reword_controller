@@ -23,7 +23,10 @@ class ReportBuilder:
         summaries: List[LayeredSummary] = []
         for task_name, blocks in data.collected.items():
             for block in blocks:
-                risk = "confirmed" if block.meta.quality_score() >= 0.7 else "low_confidence"
+                band = block.meta.quality_band()
+                risk = "confirmed" if band == "main" else "low_confidence"
+                if block.meta.layer == DataLayer.OPINION:
+                    risk = "speculative"
                 summaries.append(
                     LayeredSummary(
                         layer=block.meta.layer,
@@ -57,6 +60,9 @@ class ReportBuilder:
             caution = None
             if layer == DataLayer.OPINION:
                 caution = "커뮤니티 데이터로 신뢰도가 낮을 수 있습니다."
+            if any(block.meta.quality_band() == "support" for block in layer_blocks):
+                extra = "품질 점수가 낮은 항목이 포함되어 참고용입니다."
+                caution = extra if not caution else f"{caution} {extra}"
             sections.append(
                 ReportSection(
                     heading=heading,

@@ -46,6 +46,20 @@ class SourceMeta:
         )
         return round(total, 3)
 
+    def quality_band(self, *, main_threshold: float = 0.7, minimum_quality: float = 0.5) -> str:
+        """품질 점수에 따라 데이터를 분류한다.
+
+        - >= main_threshold: "main"
+        - >= minimum_quality: "support"
+        - else: "discard"
+        """
+        score = self.quality_score()
+        if score >= main_threshold:
+            return "main"
+        if score >= minimum_quality:
+            return "support"
+        return "discard"
+
 
 @dataclass
 class ContentBlock:
