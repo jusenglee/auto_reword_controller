@@ -11,6 +11,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 
 class DataLayer(str, Enum):
+    """데이터 성격에 따라 레이어를 구분한다.
+
+    MCP 툴이 가져오는 결과물을 "정량·공식"과 "해석·감정" 영역으로 나눠
+    품질과 신뢰도를 다르게 취급한다. Price/Disclosure/Macro는 숫자·공식
+    소스를 기반으로 하며, News/Opinion은 맥락과 여론을 보강하는 용도다.
+    """
+
     PRICE = "price"
     DISCLOSURE = "disclosure"
     MACRO = "macro"
@@ -20,6 +27,16 @@ class DataLayer(str, Enum):
 
 @dataclass
 class SourceMeta:
+    """각 데이터 조각의 신뢰도/품질 메타 정보.
+
+    - source_score: 1차/2차/커뮤니티 등 출처 신뢰도
+    - recency_score: 오늘/어제/지난주의 시점 가중치
+    - structure_score: 필수 필드 유무, 이상치 여부
+    - consistency_score: 다른 소스 대비 일관성
+
+    위 점수는 품질 관리 규칙(quality_score/quality_band)에서 사용된다.
+    """
+
     source_id: str
     layer: DataLayer
     source_score: float

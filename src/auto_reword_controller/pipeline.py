@@ -54,7 +54,15 @@ class DailyReportPipeline:
         cues: Iterable[str] | None = None,
         base_snapshot: Mapping[str, Any] | None = None,
     ) -> DailyStockReportOutput:
-        """계획/수집/요약까지 한 번에 처리."""
+        """계획/수집/요약까지 한 번에 처리.
+
+        - Base Plan으로 지수/거시/공시를 확보하고
+        - cues나 LLM이 제안한 확장 루틴을 병합한 뒤
+        - 품질 필터를 거친 수집 결과를 텍스트 리포트로 반환한다.
+
+        "신뢰성 높은 뼈대 + 다양성 있는 확장"이라는 요구 사항을 코드 레벨에서
+        그대로 보여주는 진입점이다.
+        """
         plan = self.build_plan(target_date=target_date, cues=cues, base_snapshot=base_snapshot)
         data = self.collect(plan)
         return self.build_report(data)
