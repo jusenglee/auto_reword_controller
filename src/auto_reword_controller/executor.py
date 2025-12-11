@@ -36,7 +36,7 @@ class ToolRunner(Protocol):
     def get_forum_sentiment(self, *, topics: Iterable[str]) -> Iterable[Dict[str, Any]]:
         ...
 
-    def get_volatility_snapshot(self, *, topics: Iterable[str]) -> Iterable[Dict[str, Any]]:
+    def get_volatility_snapshot(self) -> Iterable[Dict[str, Any]]:
         ...
 
 

@@ -1,8 +1,10 @@
-
 from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List
+import logging
+import re
+
 import requests
 import yfinance as yf
 
@@ -26,6 +28,7 @@ class RealToolRunner:
     ) -> None:
         self.target_date = target_date or date.today()
         self.dart_api_key = "4e8331d5b1d298378f4dce21f6ff955a398134d0"
+
         # 주입 안 해주면 기본으로 NaverNewsClient 시도
         self.news_client: NewsClient | None = news_client
         if self.news_client is None:
@@ -35,10 +38,19 @@ class RealToolRunner:
                 # 키 없거나 실패하면 그냥 None으로 두고, 아래에서 stub로 처리
                 self.news_client = None
 
+        self.logger = logging.getLogger(__name__)
 
-
-    def get_index_snapshot(self, *, indices: Iterable[str]) -> Iterable[Dict[str, Any]]:
+    # -------- PRICE 계열 --------
+    def get_index_snapshot(
+            self,
+            *,
+            indices: Iterable[str] | None = None,
+    ) -> Iterable[Dict[str, Any]]:
         """야후 파이낸스에서 KOSPI/KOSDAQ 지수 스냅샷을 가져온다."""
+        # args 비어 있을 때도 안전하게 기본값
+        if not indices:
+            indices = ["KOSPI", "KOSDAQ"]
+
         records: List[Dict[str, Any]] = []
 
         for idx_name in indices:
@@ -78,9 +90,9 @@ class RealToolRunner:
 
             # 날짜순 정렬 후, target_date 기준 가장 마지막 거래일 선택
             df = df.sort_index()
+
             # 최신/직전 종가
             close = float(df["Close"].iloc[-1])
-
 
             if len(df) >= 2:
                 prev_close = float(df["Close"].iloc[-2])
@@ -94,11 +106,17 @@ class RealToolRunner:
 
             last_date = df.index[-1].date()
 
-            body = f"{key} {close:,.2f}pt, 전일 대비 {change_pct:+.2f}% (야후 파이낸스 기준, {last_date.isoformat()} 종가)"
+            body = (
+                f"{key} {close:,.2f}pt, 전일 대비 {change_pct:+.2f}% "
+                f"(야후 파이낸스 기준, {last_date.isoformat()} 종가)"
+            )
 
             # 조회일과 실제 데이터 날짜가 다르면 안내 문구 추가 (주말/휴장 등)
             if last_date != self.target_date:
-                body += f" — {self.target_date.isoformat()}은(는) 휴장일로, 가장 가까운 과거 거래일 데이터를 사용했습니다."
+                body += (
+                    f" — {self.target_date.isoformat()}은(는) 휴장일로, "
+                    f"가장 가까운 과거 거래일 데이터를 사용했습니다."
+                )
 
             # 날짜 차이에 따라 recency_score 약간 조정
             day_diff = (self.target_date - last_date).days
@@ -110,7 +128,7 @@ class RealToolRunner:
                     "body": body,
                     "tags": [key, "index"],
                     "source_id": "yahoo_finance",
-                    "source_score": 0.9,          # 공식 지수는 아님이지만 신뢰도는 높은 편
+                    "source_score": 0.9,  # 공식 지수는 아니지만 신뢰도는 높은 편
                     "recency_score": recency_score,
                     "structure_score": 0.9,
                     "consistency_score": 0.9,
@@ -119,10 +137,7 @@ class RealToolRunner:
 
         return records
 
-    # ------------------------
-    # 2) 나머지 툴은 일단 Mock 재사용 or NotImplemented
-    # ------------------------
-    def get_top_sectors(self, *,  limit: int ) -> Iterable[Dict[str, Any]]:
+    def get_top_sectors(self, *, limit: int) -> Iterable[Dict[str, Any]]:
         lines = [
                     "반도체 : +2.3%, 거래대금 상위",
                     "2차 전지 : +1.8%",
@@ -155,7 +170,6 @@ class RealToolRunner:
         """
         records: List[Dict[str, Any]] = []
 
-
         url = "https://opendart.fss.or.kr/api/list.json"
         ymd = self.target_date.strftime("%Y%m%d")
 
@@ -168,8 +182,6 @@ class RealToolRunner:
             # 많이 필요 없으니 100개 정도로 제한
             "page_no": 1,
             "page_count": 100,
-            # 정기/주요사항/발행/지분/기타 전체
-            # 필요하면 pblntf_ty로 좁힐 수 있음
         }
 
         try:
@@ -192,7 +204,6 @@ class RealToolRunner:
 
         status = data.get("status")
         if status != "000":
-            # 에러 코드일 경우 메시지와 함께 1개만 반환
             msg = data.get("message", "알 수 없는 오류")
             records.append(
                 {
@@ -225,7 +236,6 @@ class RealToolRunner:
             )
             return records
 
-        # 중요 키워드: 합병/분할/증자/감자/자사주/배당/영업양수도/주요계약 등
         KEYWORDS = [
             "합병", "분할", "분할합병", "유상증자", "무상증자", "증자", "감자",
             "자기주식", "자사주", "배당", "영업양수도", "영업양도", "영업양수",
@@ -235,22 +245,18 @@ class RealToolRunner:
         def score_importance(report_nm: str) -> int:
             return sum(1 for kw in KEYWORDS if kw in report_nm)
 
-        # 각 공시별 중요도 스코어 부여
         scored_items = []
         for item in items:
             report_nm = item.get("report_nm", "")
             imp_score = score_importance(report_nm)
             scored_items.append((imp_score, item))
 
-        # importance='high'면 중요 키워드 없는 공시는 버리기
         if importance == "high":
             scored_items = [t for t in scored_items if t[0] > 0]
 
-        # 그래도 아무 것도 없으면 상위 몇 개는 보여주자
         if not scored_items:
             scored_items = [(0, item) for item in items]
 
-        # 중요도 → 내림차순 정렬 후 상위 N개만 사용
         scored_items.sort(key=lambda x: x[0], reverse=True)
         TOP_N = 10
         top_items = [item for _, item in scored_items[:TOP_N]]
@@ -261,10 +267,12 @@ class RealToolRunner:
             rcept_no = item.get("rcept_no", "").strip()
             rcept_dt = item.get("rcept_dt", "").strip()  # YYYYMMDD
 
-            # 공시뷰어 URL 형식: https://dart.fss.or.kr/dsaf001/main.do?rcpNo=접수번호 :contentReference[oaicite:1]{index=1}
-            viewer_url = f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}" if rcept_no else ""
+            viewer_url = (
+                f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
+                if rcept_no
+                else ""
+            )
 
-            # YYYYMMDD → YYYY-MM-DD
             pretty_dt = (
                 f"{rcept_dt[0:4]}-{rcept_dt[4:6]}-{rcept_dt[6:8]}"
                 if len(rcept_dt) == 8
@@ -283,7 +291,6 @@ class RealToolRunner:
 
             body = "\n".join(body_lines) if body_lines else "세부 정보 없음"
 
-            # 당일 공시라서 recency는 거의 최상
             recency_score = 0.95
 
             records.append(
@@ -301,6 +308,7 @@ class RealToolRunner:
 
         return records
 
+    # -------- MACRO 계열 --------
     def get_macro_snapshot(self) -> Iterable[Dict[str, Any]]:
         """
         원·달러 환율 중심의 간단한 거시 스냅샷.
@@ -379,13 +387,22 @@ class RealToolRunner:
 
         return records
 
-    def search_kr_stock_news(self, *, query: str, limit: int) -> Iterable[Dict[str, Any]]:
+    # -------- NEWS 계열 --------
+    def search_kr_stock_news(
+            self,
+            *,
+            query: str | None = None,
+            limit: int = 10,
+    ) -> Iterable[Dict[str, Any]]:
         """네이버 뉴스 검색 API를 이용해 국내 증시 관련 뉴스를 가져온다.
 
         - query: '코스닥', '밸류업', '삼성전자 공시' 등
         - limit: 최대 개수 (네이버는 최대 100건까지 허용)
         """
-        # 뉴스 클라이언트가 아예 준비 안 돼 있으면, stub 한 줄만 반환
+        # ✅ query 없으면 fallback 키워드
+        if not query:
+            query = "국내 증시"
+
         if self.news_client is None:
             return [
                 {
@@ -406,7 +423,6 @@ class RealToolRunner:
         try:
             items = self.news_client.search(query=query, limit=limit)
         except Exception as e:
-            # API 오류 시에도 파이프라인 전체가 터지지 않도록 안전하게 처리
             return [
                 {
                     "title": f"국내 증시 뉴스 조회 실패 - {query}",
@@ -426,7 +442,6 @@ class RealToolRunner:
         for item in items:
             pub_date = item.published_at.date()
             day_diff = (today - pub_date).days
-            # 오늘 0.9, 하루 전 0.8, … 최소 0.4까지
             recency = 0.9 if day_diff == 0 else max(0.4, 0.9 - 0.1 * max(day_diff, 0))
 
             body_lines = [
@@ -453,9 +468,13 @@ class RealToolRunner:
 
         return records
 
-
     # -------- OPINION 계열 --------
-    def get_forum_sentiment(self, *, topics: Iterable[str]) -> Iterable[Dict[str, Any]]:
+    def get_forum_sentiment(
+            self,
+            *,
+            topics: Iterable[str] | None = None,
+    ) -> Iterable[Dict[str, Any]]:
+        topics = list(topics or [])
         topics_str = ", ".join(topics) if topics else "시장 전반"
         body = f"[모의] 커뮤니티에서 {topics_str} 관련 낙관/비관 의견이 혼재된 상태라는 요약"
         return [
@@ -464,28 +483,23 @@ class RealToolRunner:
                 "body": body,
                 "tags": ["forum", "sentiment", "mock"],
                 "source_id": "mock_forum",
-                "source_score": 0.3,   # OPINION이라 일부러 낮게
+                "source_score": 0.3,  # OPINION이라 일부러 낮게
                 "recency_score": 0.8,
                 "structure_score": 0.6,
                 "consistency_score": 0.4,
             }
         ]
 
-    def get_volatility_snapshot(self, target_date: date) -> Iterable[ContentBlock]:
-        """국내/해외 변동성 지수 스냅샷을 가져온다.
+    # -------- RISK 계열 --------
+    def get_volatility_snapshot(self) -> Iterable[Dict[str, Any]]:
+        """국내/해외 변동성 지수(VKOSPI / VIX) 스냅샷을 가져온다."""
+        records: List[Dict[str, Any]] = []
+        target = self.target_date
 
-        - VKOSPI (KOSPI 200 Volatility, 한국 '공포지수')  -> Investing.com HTML 파싱
-        - VIX (미국 S&P500 Vol 지수)                    -> yfinance
-        """
-        blocks: list[ContentBlock] = []
-
-        # -------------------------------
-        # 1) VKOSPI (KOSPI Volatility)
-        # -------------------------------
+        # 1) VKOSPI
         try:
             url = "https://www.investing.com/indices/kospi-volatility"
             headers = {
-                # 간단한 UA 지정 (너 IDE에서 쓰던 거 아무거나 넣어도 됨)
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -496,46 +510,37 @@ class RealToolRunner:
             resp.raise_for_status()
             html = resp.text
 
-            # 페이지 안에 이런 문장이 있음:
-            # "The KOSPI Volatility live stock price is 28.40." :contentReference[oaicite:1]{index=1}
-            from typing import re
             m = re.search(
-                r"KOSPI Volatility live stock price is\s+([0-9.]+)",
+                r"KOSPI Volatility live stock price is\s*([0-9.]+)",
                 html,
             )
             if m:
                 vkospi = float(m.group(1))
                 body = (
                     f"VKOSPI(코스피200 변동성 지수) {vkospi:.2f}pt "
-                    f"(KOSPI 변동성 지수, {target_date.isoformat()} 기준 추정)"
+                    f"({target.isoformat()} 기준 Investing.com 제공 추정치)"
                 )
-                blocks.append(
-                    ContentBlock(
-                        title="국내 옵션 변동성 지수(VKOSPI)",
-                        body=body,
-                        meta=SourceMeta(
-                            source_id="investing_vkospi",
-                            layer=DataLayer.RISK,
-                            source_score=0.8,        # HTML 파싱이라 0.8 정도
-                            recency_score=0.9,
-                            structure_score=0.7,
-                            consistency_score=0.7,
-                        ),
-                        tags=["vkospi", "volatility", "options", "risk"],
-                    )
+                records.append(
+                    {
+                        "title": "국내 옵션 변동성 지수(VKOSPI)",
+                        "body": body,
+                        "tags": ["vkospi", "volatility", "options", "risk"],
+                        "source_id": "investing_vkospi",
+                        "source_score": 0.8,
+                        "recency_score": 0.9,
+                        "structure_score": 0.7,
+                        "consistency_score": 0.7,
+                    }
                 )
             else:
-                # 파싱 실패 시, LLM에게는 안 넘기고 로그만 남기기
-                self._logger.warning("[get_volatility_snapshot] VKOSPI parse 실패")
+                self.logger.warning(
+                    "[get_volatility_snapshot] VKOSPI live price 패턴 파싱 실패"
+                )
         except Exception as e:  # noqa: BLE001
-            self._logger.warning(f"[get_volatility_snapshot] VKOSPI 요청 실패: {e}")
+            self.logger.warning(f"[get_volatility_snapshot] VKOSPI 요청 실패: {e}")
 
-        # -------------------------------
-        # 2) VIX (미국 변동성 지수, 선택)
-        # -------------------------------
+        # 2) VIX
         try:
-            import yfinance as yf
-
             vix = yf.Ticker("^VIX")
             hist = vix.history(period="2d")
             if not hist.empty:
@@ -544,7 +549,7 @@ class RealToolRunner:
                 if len(hist) >= 2:
                     prev = float(hist.iloc[-2]["Close"])
                     chg = close - prev
-                    chg_pct = (chg / prev) * 100 if prev != 0 else 0.0
+                    chg_pct = (chg / prev * 100.0) if prev != 0 else 0.0
                 else:
                     chg = 0.0
                     chg_pct = 0.0
@@ -552,24 +557,25 @@ class RealToolRunner:
                 body = (
                     f"VIX(미국 S&P500 변동성 지수) {close:.2f}pt, "
                     f"전일 대비 {chg:+.2f}pt ({chg_pct:+.2f}%) "
-                    f"(야후 파이낸스 기준, {target_date.isoformat()} 기준)"
+                    f"(야후 파이낸스 기준, {target.isoformat()} 기준)"
                 )
-                blocks.append(
-                    ContentBlock(
-                        title="글로벌 변동성 지수(VIX)",
-                        body=body,
-                        meta=SourceMeta(
-                            source_id="yahoo_vix",
-                            layer=DataLayer.RISK,
-                            source_score=0.9,
-                            recency_score=0.9,
-                            structure_score=0.9,
-                            consistency_score=0.9,
-                        ),
-                        tags=["vix", "volatility", "us", "risk"],
-                    )
+                records.append(
+                    {
+                        "title": "글로벌 변동성 지수(VIX)",
+                        "body": body,
+                        "tags": ["vix", "volatility", "us", "risk"],
+                        "source_id": "yahoo_vix",
+                        "source_score": 0.9,
+                        "recency_score": 0.9,
+                        "structure_score": 0.9,
+                        "consistency_score": 0.9,
+                    }
+                )
+            else:
+                self.logger.warning(
+                    "[get_volatility_snapshot] VIX history 데이터 없음"
                 )
         except Exception as e:  # noqa: BLE001
-            self._logger.warning(f"[get_volatility_snapshot] VIX 조회 실패: {e}")
+            self.logger.warning(f"[get_volatility_snapshot] VIX 조회 실패: {e}")
 
-        return blocks
+        return records
