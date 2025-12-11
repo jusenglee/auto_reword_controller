@@ -93,6 +93,7 @@ class RealToolRunner:
 
             # 최신/직전 종가
             close = float(df["Close"].iloc[-1])
+            prev_close = float(df["Close"].iloc[-2])
 
             if len(df) >= 2:
                 prev_close = float(df["Close"].iloc[-2])
@@ -511,7 +512,7 @@ class RealToolRunner:
             html = resp.text
 
             m = re.search(
-                r"KOSPI Volatility live stock price is\s*([0-9.]+)",
+                r"KOSPI Volatility live stock price is\s*([0-9]+(?:\.[0-9]+)?)",
                 html,
             )
             if m:
